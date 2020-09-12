@@ -14,7 +14,7 @@
 bl_info = {
     "name": "Center of Mass",
     "author": "Ray Allen Datuin",
-    "version": (0, 0, 3),
+    "version": (0, 0, 4),
     "blender": (2, 90, 0),
     "location": "View3D > Tools > Center Of Mass",
     "description": "Visualizes the center of mass of a collection of objects",
@@ -28,12 +28,14 @@ import bmesh
 import mathutils
 
 # Global Variables
-timer_properties = {"timerOn" : False}
+com_data = {"timerOn" : False}
 
 # Classes
 
 class ComProperties(bpy.types.PropertyGroup):
     com_obj : bpy.props.PointerProperty(name="Center of Mass Object", type=bpy.types.Object)
+    com_offset : bpy.props.PointerProperty(name="Offset", type=bpy.types.Object)
+    com_offset_on : bpy.props.BoolProperty(name="", default=False)
     com_coll : bpy.props.PointerProperty(name="Mass Collection", type=bpy.types.Collection)
     com_scale_to_floor : bpy.props.BoolProperty(name="Scale to floor", default=False)
     com_floor : bpy.props.FloatProperty(name="Floor", description="Where the Center of Mass scales to", default=0.0)
@@ -55,6 +57,12 @@ class CenterOfMassPanel(bpy.types.Panel):
         # Center of Mass
         row = layout.row(heading="Center of Mass", align=True)
         row.prop(com_props, "com_obj", text="")
+        
+        # Offset Object
+        row = layout.row(align=True)
+        row.prop(com_props, "com_offset_on", text="Pin")
+        if com_props.get("com_offset_on") == True:
+            row.prop(com_props, "com_offset")
         
         # Mass Objects
         row = layout.row(heading="Mass Objects", align=True)
@@ -80,9 +88,9 @@ class CenterOfMassPanel(bpy.types.Panel):
         
         row = col.row()
         row.scale_y = 2.0
-        if timer_properties["timerOn"] == False:
+        if com_data["timerOn"] == False:
             row.operator("wm.update_com_timer", icon='PLAY')
-        elif timer_properties["timerOn"] == True:
+        elif com_data["timerOn"] == True:
             row.operator("wm.stop_com_timer", icon='PAUSE')
         
         row = col.row(align=True)
@@ -276,7 +284,7 @@ class ComUpdateTimer(bpy.types.Operator):
     def modal(self, context, event):
         com_props = context.scene.com_properties
         
-        if timer_properties["timerOn"] == False:
+        if com_data["timerOn"] == False:
             self.cancel(context)
             return {'CANCELLED'}
 
@@ -298,7 +306,7 @@ class ComUpdateTimer(bpy.types.Operator):
         self._timer = wm.event_timer_add((update_rate / 100), window=context.window)
         wm.modal_handler_add(self)
         
-        timer_properties["timerOn"] = True
+        com_data["timerOn"] = True
         return {'RUNNING_MODAL'}
 
     def cancel(self, context):
@@ -312,7 +320,7 @@ class StopTimer(bpy.types.Operator):
     
     def execute(self, context):
         
-        timer_properties["timerOn"] = False
+        com_data["timerOn"] = False
         return {'FINISHED'}
 
 # Function definitions
@@ -345,8 +353,14 @@ def updateComPosition():
     snap_cursor = False
     scale_floor = False
     floor_level = 0.0
+    offset_on = False
     
-    # Defaults
+    # Have to set these because property groups don't initialize until selected
+    if com_props.get("com_offset_on") is None:
+        offset_on = False
+    elif com_props.get("com_offset_on") is not None:
+        offset_on = com_props.get("com_offset_on")
+    
     if com_props.get("com_snap_cursor") is None:
         snap_cursor = False
     elif com_props.get("com_snap_cursor") is not None:
@@ -375,13 +389,20 @@ def updateComPosition():
             accum_mass += obj_mass
             accum_pos += (obj_mass * obj.matrix_world.translation)
     
+    # Prevents divide by zero error
     if accum_mass != 0:
         new_pos = (accum_pos / accum_mass)
     else:
         new_pos = mathutils.Vector((0, 0, 0))
     
+    # Difference
+    difference = new_pos - old_pos
+    
     # Move center of mass object
-    comObj.matrix_world.translation = new_pos
+    if offset_on == False:
+        comObj.matrix_world.translation += difference
+    elif offset_on == True:
+        com_props["com_offset"].matrix_world.translation -= difference
 
     # Move Cursor
     if snap_cursor:
